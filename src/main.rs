@@ -1,7 +1,24 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-fn main() {
+use tokio::net::TcpListener;
+
+#[tokio::main]
+async fn main() {
+    // Starts listening on address and port
+    let listener = TcpListener::bind("127.0.0.1:7878").await.unwrap();
+    println!("Server listening on 127.0.0.1:7878");
+
+    loop {
+        let (_socket, addr) = listener.accept().await.unwrap();
+        println!("New connection from {}", addr);
+
+        tokio::spawn(async move {
+
+        });
+    }
+
+    
     let store = Store::new();
     
     let key = "hello".to_string();
@@ -10,7 +27,7 @@ fn main() {
     store.set(key, value); // key/value ownership moves into set()
 
     let result = store.get("hello".to_string()); // fresh String , since original 'key' was moved above
-    println!("{:?}", result); // {:?} becasue Option<String> doesn't implement Display
+    println!("{:?}", result); // {:?} becasue Option<String> doesn't implement Display 
 }
 
 // Thread-safe key-value store
