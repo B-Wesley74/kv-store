@@ -2,16 +2,52 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 fn main() {
-    // (HashMap::new) make an empty map, (Mutex::new) wrap it for safe access, (Arc::new) wraps that so it can be shared
-    let store: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    let store = Store::new();
+    
+    let key = "hello".to_string();
+    let value = "world".to_string();
 
-    {
-        let mut map = store.lock().unwrap(); // unwrap() because .lock() can fail 
-        map.insert("hello".to_string(), "world".to_string());
-    } // lock is released automatically
+    store.set(key, value); // key/value ownership moves into set()
 
-    {
-        let map = store.lock().unwrap();
-        println!("{:?}", map);
+    let result = store.get("hello".to_string()); // fresh String , since original 'key' was moved above
+    println!("{:?}", result); // {:?} becasue Option<String> doesn't implement Display
+}
+
+// Thread-safe key-value store
+// Wraps a HashMap so it can be shared and mutated across multiple threads
+struct Store {
+    // Arc: allows multiple threads to share ownership of the same data
+    // Mutex: ensures only on thread can access/modify the HashMap at a time
+    // HashMap: the actual key-value data
+    data: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl Store {
+    // Creates a new empty Store
+    fn new() -> Store {
+        Store {
+            data: Arc::new(Mutex::new(HashMap::new())),
+        }   
+    }
+
+    // Inserts or updates a key-value pair.
+    // Takes ownership of both key and value.
+    fn set(&self, key: String, value: String) {
+        let mut map = self.data.lock().unwrap();
+        map.insert(key, value);
+    } // lock is automatically released when 'map' goes out of scope
+
+    // Looks up value by key
+    // Returns Some(value) if found, None if the key doesn't exist.
+    fn get(&self, key: String) -> Option<String> {
+        let map = self.data.lock().unwrap(); // lock for read-only access
+        map.get(&key).cloned() // .cloned() copies the value out, since map.get() only gives a reference
+    }
+
+    // Removes the key-value pair if it exists
+    // Returns the removed value (Some), or None if the key wasn't present.
+    fn _delete(&self, key: String) -> Option<String> {
+        let mut map = self.data.lock().unwrap(); // lock for exclusive (mutable) access, since remove() mutates the map
+        map.remove(&key)
     }
 }
