@@ -4,6 +4,9 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher}; // Hash gices strings and other types, Hasher gets the final number out
+
 // Thread-safe key-value store
 // Wraps a HashMap so it can be shared and mutated across multiple threads
 #[derive(Clone)]
@@ -11,35 +14,45 @@ struct Store {
     // Arc: allows multiple threads to share ownership of the same data
     // Mutex: ensures only on thread can access/modify the HashMap at a time
     // HashMap: the actual key-value data
-    data: Arc<Mutex<HashMap<String, String>>>,
+    shards: Arc<Vec<Mutex<HashMap<String, String>>>>,
+    num_shards: usize, 
 }
 
 impl Store {
-    // Creates a new empty Store
-    fn new() -> Store {
+
+    fn new(num_shards: usize) -> Store {
+        let mut shards = Vec::new(); // start with an empty list
+        for _ in 0..num_shards { // loop num_shards times
+            shards.push(Mutex::new(HashMap::new())); // each iteration creates a new, independent Mutex<HashMap> and adds it to the list.
+        }
+
         Store {
-            data: Arc::new(Mutex::new(HashMap::new())),
-        }   
+            shards: Arc::new(shards), // wrap the finished Vec once so it can be shared
+            num_shards,
+        }
     }
 
     // Inserts or updates a key-value pair.
     // Takes ownership of both key and value.
     fn set(&self, key: String, value: String) {
-        let mut map = self.data.lock().unwrap();
+        let index = shard_index(&key, self.num_shards);
+        let mut map = self.shards[index].lock().unwrap();
         map.insert(key, value);
-    } // lock is automatically released when 'map' goes out of scope
+    }
 
     // Looks up value by key
     // Returns Some(value) if found, None if the key doesn't exist.
     fn get(&self, key: String) -> Option<String> {
-        let map = self.data.lock().unwrap(); // lock for read-only access
+        let index = shard_index(&key, self.num_shards);
+        let map = self.shards[index].lock().unwrap(); // lock for read-only access
         map.get(&key).cloned() // .cloned() copies the value out, since map.get() only gives a reference
     }
 
     // Removes the key-value pair if it exists
     // Returns the removed value (Some), or None if the key wasn't present.
     fn delete(&self, key: String) -> Option<String> {
-        let mut map = self.data.lock().unwrap(); // lock for exclusive (mutable) access, since remove() mutates the map
+        let index = shard_index(&key, self.num_shards);
+        let mut map = self.shards[index].lock().unwrap(); // lock for exclusive (mutable) access, since remove() mutates the map
         map.remove(&key)
     }
 }
@@ -51,7 +64,7 @@ async fn main() {
 
     // Create ONE store, shared by every client connection.
     // This lives for the whole lidetime of the server.
-    let store = Store::new();
+    let store = Store::new(16);
 
     loop {
         // socket = the actual connection to this one client
@@ -145,6 +158,13 @@ async fn handle_connection(socket: tokio::net::TcpStream, store: Store) {
             }
         }
     }
+}
+
+fn shard_index(key: &str, num_shards: usize) -> usize {
+    let mut hasher = DefaultHasher::new(); // create an empty hasher
+    key.hash(&mut hasher); // process the strings bytes in order so "ab" is different from "ba"
+    let hash_value = hasher.finish(); // extract the final number
+    (hash_value % num_shards as u64) as usize // convert num_shards into u64 to match hash_values type so % works, then convert back.
 }
 
 
